@@ -1,0 +1,21 @@
+env_name: "PointMassObstacle-v0"
+env_settings:
+  params:
+    _target_: rl_utils.envs.pointmass.PointMassObstacleParams
+    start_state_noise: 0.05
+    dt: 0.05
+    ep_horizon: 50
+    start_idx: 0
+    square_obstacles:
+      - _target_: rl_utils.envs.pointmass.SquareObstacle
+        xy: [0.5, 0.5]
+        width: 0.44
+        height: 0.1
+        rot_deg: -45.0
+    custom_reward:
+      _target_: common.pointmass_utils.PMDistActionPenReward
+      slack: 0.01
+      action_pen: 0.05
+      succ_dist: 0.05
+  set_eval: False
+
