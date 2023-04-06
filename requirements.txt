@@ -1,0 +1,12 @@
+matplotlib
+numpy>=1.16.1
+torch>=1.8.1
+subprocess32>=3.5.4
+gym>=0.17.1
+opencv-python
+omegaconf>=2.0.0
+higher
+hydra-core==1.1.2
+wandb
+rl-exp-utils==0.14
+torchrl==0.0.3
