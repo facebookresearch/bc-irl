@@ -9,4 +9,3 @@ higher
 hydra-core==1.1.2
 wandb
 rl-exp-utils==0.14
-torchrl==0.0.3

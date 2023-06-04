@@ -2,37 +2,36 @@
 defaults:
   - override /env: pointmass_obstacle
   - override /evaluator: pointmass
+
+evaluator:
+  plot_il: False
+ 
 num_steps: 50
 num_envs: 128
 log_interval: 10
 save_interval: 10000000000
-num_env_steps: 3e6
 eval_interval: 400
-
-evaluator:
-  plot_expert: False
+num_env_steps: 1e7
 
 policy_updater:
-  _target_: imitation_learning.gcl.updater.GCL
+  _target_: gail.updater.GAIL
   _recursive_: False
 
+  dataset_path: traj/pm_obstacle_100.pth
   batch_size: 256
-  device: ${device}
+  reward_update_freq: 1
+  num_discrim_batches: 2
   num_envs: ${num_envs}
-  should_update_reward: True
 
-  get_dataset_fn:
-    _target_: imitation_learning.common.utils.get_transition_dataset
-    dataset_path: traj/pm_obstacle_100.pth
-    env_name: ${env.env_name}
-
-  reward:
-    _target_: imitation_learning.common.net.NeuralReward
+  discriminator:
+    _target_: gail.discriminator.GailDiscriminator
     obs_shape: ${obs_shape}
     action_dim: ${action_dim}
     reward_hidden_dim: 128
-    cost_take_dim: -1
     n_hidden_layers: 2
+    cost_take_dim: -1
+    use_actions: True
+    reward_type: "GAIL"
 
   policy_updater:
     _target_: policy_opt.ppo.PPO
@@ -56,13 +55,14 @@ policy_updater:
     num_steps: ${num_steps}
     num_envs: ${num_envs}
 
-  reward_opt:
+  discrim_opt:
     _target_: torch.optim.Adam
     lr: 3e-4
 
 eval_args:
   policy_updater:
-    should_update_reward: False
+    reward_update_freq: -1
+    n_inner_iters: 1
   load_policy: False
   num_env_steps: 5e6
 

@@ -5,10 +5,10 @@ defaults:
 
 num_steps: 50
 num_envs: 128
-log_interval: 50
+log_interval: 10
 # Evaluate at the end.
 eval_interval: 100
-num_env_steps: 2e7
+num_env_steps: 5e6
 policy:
   std_init: -1.0
   squash_mean: True
@@ -26,16 +26,10 @@ policy_updater:
 
   # Returns calculation
   gae_lambda: 0.95
+  use_gae: True
   gamma: 0.99
   optimizer_params:
     lr: 3e-4
-
-env_settings:
-  params:
-    custom_reward:
-      _target_: common.pointmass_utils.PMDistActionPenReward
-      slack: 0.01
-      action_pen: 0.05
 
 evaluator:
   plot_il: False

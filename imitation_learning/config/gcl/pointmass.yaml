@@ -13,7 +13,7 @@ evaluator:
   plot_expert: False
 
 policy_updater:
-  _target_: imitation_learning.gcl.GCL
+  _target_: imitation_learning.gcl.updater.GCL
   _recursive_: False
 
   batch_size: 256
@@ -27,7 +27,7 @@ policy_updater:
     env_name: ${env.env_name}
 
   reward:
-    _target_: imitation_learning.gcl.NeuralReward
+    _target_: imitation_learning.common.net.NeuralReward
     obs_shape: ${obs_shape}
     action_dim: ${action_dim}
     reward_hidden_dim: 128
@@ -35,7 +35,7 @@ policy_updater:
     n_hidden_layers: 2
 
   policy_updater:
-    _target_: imitation_learning.policy_opt.ppo.PPO
+    _target_: policy_opt.ppo.PPO
     _recursive_: False
 
     use_clipped_value_loss: True
@@ -48,6 +48,7 @@ policy_updater:
 
     # Returns calculation
     gae_lambda: 0.95
+    use_gae: True
     gamma: 0.99
     optimizer_params:
       _target_: torch.optim.Adam

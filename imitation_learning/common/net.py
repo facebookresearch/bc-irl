@@ -1,8 +1,3 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
-#
-# This source code is licensed under the MIT license found in the
-# LICENSE file in the root directory of this source tree.
-
 from enum import Enum, auto
 
 import torch
@@ -28,10 +23,11 @@ class NeuralReward(nn.Module):
         reward_type=None,
         clamp_max=None,
     ):
-        if reward_type is None:
-            reward_type = RewardInputType.NEXT_STATE
         super().__init__()
-        self.reward_type = RewardInputType[reward_type]
+        if reward_type is None:
+            self.reward_type = RewardInputType.NEXT_STATE
+        else:
+            self.reward_type = RewardInputType[reward_type]
         self.cost_take_dim = cost_take_dim
 
         obs_size = obs_shape[0] if cost_take_dim == -1 else cost_take_dim

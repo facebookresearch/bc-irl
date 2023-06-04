@@ -10,12 +10,11 @@ import matplotlib.ticker as ticker
 import numpy as np
 import seaborn as sns
 import torch
-from imitation_learning.common.evaluator import Evaluator
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.colors import LogNorm
 from matplotlib.patches import Rectangle
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from rl_utils.common import group_trajectories
+from rl_utils.common import Evaluator, group_trajectories
 from rl_utils.envs.pointmass import PointMassObstacleEnv
 
 

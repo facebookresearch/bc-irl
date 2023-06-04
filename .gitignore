@@ -1,0 +1,7 @@
+.hydra
+data/
+*.log
+.egg-info
+*.egg-info
+__pycache__
+wandb

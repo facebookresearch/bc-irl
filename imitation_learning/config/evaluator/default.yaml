@@ -1,4 +1,4 @@
-_target_: imitation_learning.common.evaluator.Evaluator
+_target_: rl_utils.common.Evaluator
 rnn_hxs_dim: ${policy.recurrent_hidden_size}
 num_render: 0
 fps: 10

@@ -15,7 +15,7 @@ num_steps: 128
 num_envs: 32
 device: "cpu"
 only_eval: False
-seed: 3
+seed: 31
 num_eval_episodes: 100
 num_env_steps: 1e7
 recurrent_hidden_state_size: 128
@@ -23,7 +23,7 @@ gamma: 0.99
 
 # Intervals
 log_interval: 1
-eval_interval: 500
+eval_interval: -1
 save_interval: 100000000000
 
 # Saving / Loading
@@ -40,7 +40,6 @@ policy:
   action_dim: ${action_dim}
   action_is_discrete: ${action_is_discrete}
   std_init: 0.0
-  num_envs: ${num_envs}
 
 policy_updater:
   _target_: imitation_learning.policy_opt.ppo.PPO
@@ -58,11 +57,22 @@ policy_updater:
 
   # Returns calculation
   gae_lambda: 0.95
+  use_gae: True
   gamma: ${gamma}
 
   optimizer_params:
     _target_: torch.optim.Adam
     lr: 3e-4
+
+storage:
+  _target_: imitation_learning.policy_opt.storage.RolloutStorage
+  num_steps: ${num_steps}
+  num_processes: ${num_envs}
+  recurrent_hidden_state_size: ${policy.recurrent_hidden_size}
+  obs_shape: ${obs_shape}
+  action_dim: ${action_dim}
+  action_is_discrete: ${action_is_discrete}
+  fetch_final_obs: True
 
 hydra:
   run:

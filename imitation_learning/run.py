@@ -3,42 +3,33 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
+import os
 import os.path as osp
-import random
-from typing import Dict
+from collections import defaultdict
+from typing import Dict, Optional
 
 import gym.spaces as spaces
 import hydra
 import numpy as np
 import torch
+import torch.nn as nn
 from hydra.utils import instantiate as hydra_instantiate
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
+from rl_utils.common import (Evaluator, compress_dict, get_size_for_space,
+                             set_seed)
 from rl_utils.envs import create_vectorized_envs
 from rl_utils.logging import Logger
-from tensordict.tensordict import TensorDict
-from torchrl.envs.utils import step_mdp
 
-from imitation_learning.common.evaluator import Evaluator
-
-
-def set_seed(seed: int) -> None:
-    """
-    Sets the seed for numpy, python random, and pytorch.
-    """
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
+from imitation_learning.policy_opt.policy import Policy
+from imitation_learning.policy_opt.ppo import PPO
+from imitation_learning.policy_opt.storage import RolloutStorage
 
 
 @hydra.main(config_path="config", config_name="default")
 def main(cfg) -> Dict[str, float]:
     set_seed(cfg.seed)
-
     device = torch.device(cfg.device)
 
-    # Setup the environments
     set_env_settings = {
         k: hydra_instantiate(v) if isinstance(v, DictConfig) else v
         for k, v in cfg.env.env_settings.items()
@@ -54,14 +45,15 @@ def main(cfg) -> Dict[str, float]:
     steps_per_update = cfg.num_steps * cfg.num_envs
     num_updates = int(cfg.num_env_steps) // steps_per_update
 
-    # Set dynamic variables in the config.
     cfg.obs_shape = envs.observation_space.shape
-    cfg.action_dim = envs.action_space.shape[0]
+    cfg.action_dim = get_size_for_space(envs.action_space)
     cfg.action_is_discrete = isinstance(cfg.action_dim, spaces.Discrete)
     cfg.total_num_updates = num_updates
 
     logger: Logger = hydra_instantiate(cfg.logger, full_cfg=cfg)
-    policy = hydra_instantiate(cfg.policy)
+
+    storage: RolloutStorage = hydra_instantiate(cfg.storage, device=device)
+    policy: Policy = hydra_instantiate(cfg.policy)
     policy = policy.to(device)
     updater = hydra_instantiate(cfg.policy_updater, policy=policy, device=device)
     evaluator: Evaluator = hydra_instantiate(
@@ -75,8 +67,6 @@ def main(cfg) -> Dict[str, float]:
 
     start_update = 0
     if cfg.load_checkpoint is not None:
-        # Load a checkpoint for the policy/reward. Also potentially resume
-        # training.
         ckpt = torch.load(cfg.load_checkpoint)
         updater.load_state_dict(ckpt["updater"], should_load_opt=cfg.resume_training)
         if cfg.load_policy:
@@ -87,7 +77,6 @@ def main(cfg) -> Dict[str, float]:
     eval_info = {"run_name": logger.run_name}
 
     if cfg.only_eval:
-        # Evaluate the policy and end.
         eval_result = evaluator.evaluate(policy, cfg.num_eval_episodes, 0)
         logger.collect_infos(eval_result, "eval.", no_rolling_window=True)
         eval_info.update(eval_result)
@@ -97,32 +86,24 @@ def main(cfg) -> Dict[str, float]:
         return eval_info
 
     obs = envs.reset()
-    td = TensorDict({"observation": obs}, batch_size=[cfg.num_envs])
-    # Storage for the rollouts
-    storage_td = TensorDict({}, batch_size=[cfg.num_envs, cfg.num_steps], device=device)
+    storage.init_storage(obs)
 
     for update_i in range(start_update, num_updates):
         is_last_update = update_i == num_updates - 1
         for step_idx in range(cfg.num_steps):
-            # Collect experience.
             with torch.no_grad():
-                policy.act(td)
-            next_obs, reward, done, infos = envs.step(td["action"])
+                act_data = policy.act(
+                    storage.get_obs(step_idx),
+                    storage.recurrent_hidden_states[step_idx],
+                    storage.masks[step_idx],
+                )
+            next_obs, reward, done, info = envs.step(act_data["actions"])
+            storage.insert(next_obs, reward, done, info, **act_data)
+            logger.collect_env_step_info(info)
 
-            td["next_observation"] = next_obs
-            for env_i, info in enumerate(infos):
-                if "final_obs" in info:
-                    td["next_observation"][env_i] = info["final_obs"]
-            td["reward"] = reward
-            td["done"] = done
+        updater.update(policy, storage, logger, envs=envs)
 
-            storage_td[:, step_idx] = td
-            td["observation"] = next_obs
-            # Log to CLI/wandb.
-            logger.collect_env_step_info(infos)
-
-        # Call method specific update function
-        updater.update(policy, storage_td, logger, envs=envs)
+        storage.after_update()
 
         if cfg.eval_interval != -1 and (
             update_i % cfg.eval_interval == 0 or is_last_update

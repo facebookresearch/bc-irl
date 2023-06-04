@@ -6,14 +6,14 @@ num_steps: 1
 num_envs: 1
 log_interval: 1
 save_interval: 10000000000
-num_env_steps: 150
+num_env_steps: 500
 eval_interval: 10
 
 evaluator:
   plot_expert: False
 
 policy_updater:
-  _target_: imitation_learning.maxent.MaxEntIRL
+  _target_: imitation_learning.maxent.updater.MaxEntIRL
   _recursive_: False
 
   batch_size: 256
@@ -28,7 +28,7 @@ policy_updater:
     env_name: ${env.env_name}
 
   reward:
-    _target_: imitation_learning.maxent.NeuralReward
+    _target_: imitation_learning.common.net.NeuralReward
     obs_shape: ${obs_shape}
     action_dim: ${action_dim}
     reward_hidden_dim: 128
@@ -49,6 +49,7 @@ policy_updater:
 
     # Returns calculation
     gae_lambda: 0.95
+    use_gae: True
     gamma: 0.99
     optimizer_params:
       _target_: torch.optim.Adam
@@ -57,7 +58,7 @@ policy_updater:
     num_envs: ${num_envs}
   reward_opt:
     _target_: torch.optim.Adam
-    lr: 3e-4
+    lr: 0.001
 
 eval_args:
   policy_updater:

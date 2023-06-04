@@ -11,28 +11,9 @@ from omegaconf import DictConfig
 from rl_utils.common import DictDataset, make_mlp_layers
 from torch.utils.data import DataLoader
 
-from imitation_learning.common.utils import log_finished_rewards
-
-
-class NeuralReward(nn.Module):
-    def __init__(
-        self,
-        obs_shape,
-        action_dim,
-        reward_hidden_dim,
-        cost_take_dim,
-        n_hidden_layers,
-    ):
-        super().__init__()
-        self.cost_take_dim = cost_take_dim
-
-        obs_size = obs_shape[0] if cost_take_dim == -1 else cost_take_dim
-        self.net = nn.Sequential(
-            *make_mlp_layers(obs_size, 1, reward_hidden_dim, n_hidden_layers)
-        )
-
-    def forward(self, obs):
-        return self.net(obs)
+from imitation_learning.common.utils import (create_next_obs,
+                                             extract_transition_batch,
+                                             log_finished_rewards)
 
 
 class MaxEntIRL(nn.Module):
@@ -93,15 +74,15 @@ class MaxEntIRL(nn.Module):
         return super().load_state_dict(state_dict)
 
     def viz_reward(self, cur_obs=None, action=None, next_obs=None) -> torch.Tensor:
-        return self.reward(next_obs)
+        return self.reward(next_obs=next_obs)
 
     def update(self, policy, rollouts, logger, **kwargs):
         if self.should_update_reward:
             for _ in range(self.num_cost_epochs):
-                reward_samples = self.reward(self.grid_samples)
+                reward_samples = self.reward(next_obs=self.grid_samples)
 
                 # we sample a demo
-                reward_demos = self.reward(self.demo_obs)
+                reward_demos = self.reward(next_obs=self.demo_obs)
 
                 # optimize reward
                 loss_ME = -(
@@ -117,7 +98,8 @@ class MaxEntIRL(nn.Module):
                 logger.collect_info("irl_loss", loss_ME.item())
         else:
             with torch.no_grad():
-                rollouts["reward"] = self.reward(rollouts["next_observation"])
+                _, _, next_obs, _ = extract_transition_batch(rollouts)
+                rollouts.rewards = self.reward(next_obs=next_obs)
                 self._ep_rewards = log_finished_rewards(
                     rollouts, self._ep_rewards, logger
                 )

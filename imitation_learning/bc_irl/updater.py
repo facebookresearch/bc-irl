@@ -3,25 +3,20 @@
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
-from copy import deepcopy
-from typing import Callable, List
+from typing import Callable
 
-import functorch
 import higher
 import torch
 import torch.nn as nn
 from hydra.utils import call, instantiate
 from omegaconf import DictConfig
-from tensordict.tensordict import TensorDict
+from rl_utils.common import DictDataset
 from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.data import DataLoader
 
 from imitation_learning.common.plotting import plot_actions
-from imitation_learning.common.utils import log_finished_rewards
-
-
-def reg_init(old_policy, **kwargs):
-    return old_policy
+from imitation_learning.common.utils import (extract_transition_batch,
+                                             log_finished_rewards)
 
 
 class BCIRL(nn.Module):
@@ -39,6 +34,7 @@ class BCIRL(nn.Module):
         n_inner_iters: int,
         num_steps: int,
         reward_update_freq: int,
+        storage_cfg: DictConfig,
         device,
         total_num_updates: int,
         num_envs: int,
@@ -48,7 +44,8 @@ class BCIRL(nn.Module):
         **kwargs,
     ):
         super().__init__()
-        self.inner_updater = instantiate(inner_updater)
+        if inner_updater is not None:
+            self.inner_updater = instantiate(inner_updater)
         self.reward = instantiate(reward).to(device)
 
         self.dataset = call(get_dataset_fn)
@@ -80,8 +77,12 @@ class BCIRL(nn.Module):
         self.n_inner_iters = n_inner_iters
         self.num_steps = num_steps
         self.reward_update_freq = reward_update_freq
+        self.storage_cfg = storage_cfg
         self.device = device
-        self.num_envs = num_envs
+        self.all_rollouts = [
+            instantiate(self.storage_cfg, device=self.device)
+            for _ in range(self.n_inner_iters - 1)
+        ]
         self._ep_rewards = torch.zeros(num_envs, device=self.device)
 
     def state_dict(self):
@@ -100,7 +101,6 @@ class BCIRL(nn.Module):
         return self.reward(cur_obs, action, next_obs)
 
     def _irl_loss_step(self, policy, logger):
-        # Compute the outer loop loss
         expert_batch = next(self.data_loader_iter, None)
         if expert_batch is None:
             self.data_loader_iter = iter(self.data_loader)
@@ -112,9 +112,7 @@ class BCIRL(nn.Module):
             # out of that range
             expert_actions = torch.clamp(expert_actions, -1.0, 1.0)
 
-        td = TensorDict(source={"observation": expert_obs}, batch_size=[])
-        dist = policy.get_action_dist(td)
-        # Ignore the variance prediction.
+        dist = policy.get_action_dist(expert_obs, None, None)
         pred_actions = dist.mean
 
         irl_loss_val = self.irl_loss(expert_actions, pred_actions)
@@ -142,18 +140,14 @@ class BCIRL(nn.Module):
             self.inner_opt, lr=self.inner_lr, params=policy.parameters()
         )
 
-        # Setup meta learning loop
+        # Setup Meta loop
         with higher.innerloop_ctx(
             policy,
             policy_opt,
         ) as (dpolicy, diffopt):
             for inner_i in range(self.n_inner_iters):
-
-                rollouts["reward"] = self.reward(
-                    rollouts["observation"],
-                    rollouts["action"],
-                    rollouts["next_observation"],
-                )
+                obs, actions, next_obs, masks = extract_transition_batch(rollouts)
+                rollouts.rewards = self.reward(obs, actions, next_obs)
 
                 if inner_i == 0:
                     self._ep_rewards = log_finished_rewards(
@@ -161,31 +155,32 @@ class BCIRL(nn.Module):
                     )
 
                 # Inner loop policy update
-                self.inner_updater.update(dpolicy, rollouts, logger, diffopt)
+                self.inner_updater.update(
+                    dpolicy, rollouts, logger, diffopt, rollouts.rewards
+                )
 
                 if inner_i != self.n_inner_iters - 1:
-                    # Additional inner loop policy updates (if n_inner_iters > 1)
-                    td = rollouts[:, -1]
-                    new_rollouts = TensorDict(
-                        {},
-                        batch_size=[self.num_envs, self.num_steps],
-                        device=self.device,
+                    new_rollouts = self.all_rollouts[inner_i - 1]
+                    for k in rollouts.obs_keys:
+                        new_rollouts.obs[k][0].copy_(rollouts.obs[k][-1])
+
+                    new_rollouts.masks[0].copy_(rollouts.masks[-1])
+                    new_rollouts.bad_masks[0].copy_(rollouts.bad_masks[-1])
+                    new_rollouts.recurrent_hidden_states[0].copy_(
+                        rollouts.recurrent_hidden_states[-1]
                     )
+
+                    # Collect the next batch of data.
+                    new_rollouts.after_update()
                     for step_idx in range(self.num_steps):
                         with torch.no_grad():
-                            policy.act(td)
-                        next_obs, reward, done, infos = envs.step(td["action"])
-
-                        td["next_observation"] = next_obs
-                        for env_i, info in enumerate(infos):
-                            if "final_obs" in info:
-                                td["next_observation"][env_i] = info["final_obs"]
-                        td["reward"] = reward
-                        td["done"] = done
-
-                        new_rollouts[:, step_idx] = td
-                        td["observation"] = next_obs
-                        logger.collect_env_step_info(infos)
+                            act_data = policy.act(
+                                new_rollouts.get_obs(step_idx),
+                                new_rollouts.recurrent_hidden_states[step_idx],
+                                new_rollouts.masks[step_idx],
+                            )
+                        next_obs, reward, done, info = envs.step(act_data["action"])
+                        new_rollouts.insert(next_obs, reward, done, info, **act_data)
                     rollouts = new_rollouts
 
             # Compute IRL loss
@@ -199,7 +194,6 @@ class BCIRL(nn.Module):
             if hasattr(self.reward, "log"):
                 self.reward.log(logger)
 
-        # Copy over the temporary policy form the meta-learning loop to the permanent policy.
         policy.load_state_dict(dpolicy.state_dict())
 
         if self.use_lr_decay and self.reward_update_freq != -1:

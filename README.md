@@ -10,7 +10,7 @@ This is the official PyTorch code implementation for ["BC-IRL: Learning Generali
 </p>
 
 ## Installation
-* Requires Python >= 3.7: `conda create -n bcirl python=3.7`
+* Requires Python >= 3.7: `conda create -y -n bcirl python=3.7`
 * `pip install -e .`
 
 ## Commands
@@ -24,7 +24,7 @@ To run the obstacle version, substitute `pointmass` with `pointmass_obstacle`.
 
 ### Evaluate Rewards
 To evaluate on the `eval` distribution add: `env=pointmass_eval`. Specify the path of the saved reward with `load_checkpoint=`.
-* BC-IRL-PPO `python imitation-learning/eval.py +meta_irl=pointmass load_checkpoint=saved_reward.pth`
+* BC-IRL-PPO `python imitation_learning/eval.py +meta_irl=pointmass load_checkpoint=saved_reward.pth`
 * GCL `python imitation_learning/eval.py +gcl=pointmass load_checkpoint=saved_reward.pth`
 * AIRL `python imitation_learning/eval.py +airl=pointmass load_checkpoint=saved_reward.pth`
 * MaxEnt `python imitation_learning/eval.py +maxent=pointmass load_checkpoint=saved_reward.pth`
@@ -42,11 +42,11 @@ Structure of the code under `imitation_learning`:
 
 # Citation
 ```
-@article{szotbcirl,
+@article{szot2023bc,
   title={BC-IRL: Learning Generalizable Reward Functions from Demonstrations},
-  author={Andrew Szot and Amy Zhang and Dhruv Batra and Zsolt Kira and Franziska Meier},
-  journal={arXiv preprint},
-  year={2022}
+  author={Szot, Andrew and Zhang, Amy and Batra, Dhruv and Kira, Zsolt and Meier, Franziska},
+  journal={arXiv preprint arXiv:2303.16194},
+  year={2023}
 }
 ```
 

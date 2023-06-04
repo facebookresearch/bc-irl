@@ -17,16 +17,25 @@ def log_finished_rewards(
     """
     :param rolling_ep_rewards: tensor of shape (num_envs,)
     """
-    num_envs, num_steps = rollouts["reward"].shape[:2]
+    num_steps, num_envs = rollouts.rewards.shape[:2]
     done_episodes_rewards = []
     for env_i in range(num_envs):
         for step_i in range(num_steps):
-            rolling_ep_rewards[env_i] += rollouts["reward"][env_i, step_i].item()
-            if rollouts["done"][env_i, step_i].item():
+            rolling_ep_rewards[env_i] += rollouts.rewards[step_i, env_i].item()
+            if rollouts.masks[step_i + 1, env_i].item() == 0.0:
                 done_episodes_rewards.append(rolling_ep_rewards[env_i].item())
                 rolling_ep_rewards[env_i] = 0
     logger.collect_info_list("inferred_episode_reward", done_episodes_rewards)
     return rolling_ep_rewards
+
+
+def extract_transition_batch(rollouts):
+    obs = next(iter(rollouts.obs.values()))
+    cur_obs = obs[:-1]
+    masks = rollouts.masks[1:]
+    next_obs = (masks * obs[1:]) + ((1 - masks) * rollouts.final_obs)
+    actions = rollouts.actions
+    return cur_obs, actions, next_obs, masks
 
 
 def create_next_obs(dataset: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:

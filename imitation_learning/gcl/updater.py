@@ -9,30 +9,10 @@ from hydra.utils import call, instantiate
 from omegaconf import DictConfig
 from rl_utils.common import DictDataset, make_mlp_layers
 from torch.utils.data import DataLoader
-from torchrl.trainers import BatchSubSampler
 
-from imitation_learning.common.utils import log_finished_rewards
-
-
-class NeuralReward(nn.Module):
-    def __init__(
-        self,
-        obs_shape,
-        action_dim,
-        reward_hidden_dim,
-        cost_take_dim,
-        n_hidden_layers,
-    ):
-        super().__init__()
-        self.cost_take_dim = cost_take_dim
-
-        obs_size = obs_shape[0] if cost_take_dim == -1 else cost_take_dim
-        self.net = nn.Sequential(
-            *make_mlp_layers(obs_size, 1, reward_hidden_dim, n_hidden_layers)
-        )
-
-    def forward(self, obs):
-        return self.net(obs)
+from imitation_learning.common.utils import (create_next_obs,
+                                             extract_transition_batch,
+                                             log_finished_rewards)
 
 
 class GCL(nn.Module):
@@ -74,27 +54,32 @@ class GCL(nn.Module):
         return super().load_state_dict(state_dict)
 
     def viz_reward(self, cur_obs=None, action=None, next_obs=None) -> torch.Tensor:
-        return self.reward(next_obs)
+        return self.reward(next_obs=next_obs)
 
     def update(self, policy, rollouts, logger, **kwargs):
         if self.should_update_reward:
+            obs, actions, next_obs, masks = extract_transition_batch(rollouts)
 
             reward_samples = []
 
-            data_gen = BatchSubSampler(batch_size=self.batch_size)
-            flat_rollouts = rollouts.view(-1)
-            for expert_batch in self.expert_data:
-                agent_batch = data_gen(flat_rollouts)
-                ac_eval = policy.evaluate_actions(agent_batch)
+            num_batches = len(rollouts) // self.batch_size
+            agent_data = rollouts.data_generator(num_batches, get_next_obs=True)
+            for expert_batch, agent_batch in zip(self.expert_data, agent_data):
+                ac_eval = policy.evaluate_actions(
+                    agent_batch["obs"],
+                    agent_batch["hxs"],
+                    agent_batch["mask"],
+                    agent_batch["action"],
+                )
 
-                reward_demos = self.reward(expert_batch["next_observations"])
-                reward_samples = self.reward(agent_batch["next_observation"])
+                reward_demos = self.reward(next_obs=expert_batch["next_observations"])
+                reward_samples = self.reward(next_obs=agent_batch["next_obs"])
 
                 loss_IOC = -(
                     torch.mean(reward_demos)
                     - (
                         torch.logsumexp(
-                            reward_samples - ac_eval["log_prob"].view(-1, 1),
+                            reward_samples - ac_eval["log_prob"],
                             dim=0,
                             keepdim=True,
                         )
@@ -107,6 +92,7 @@ class GCL(nn.Module):
                 logger.collect_info("irl_loss", loss_IOC.item())
 
         with torch.no_grad():
-            rollouts["reward"] = self.reward(rollouts["next_observation"])
+            _, _, next_obs, _ = extract_transition_batch(rollouts)
+            rollouts.rewards = self.reward(next_obs=next_obs)
             self._ep_rewards = log_finished_rewards(rollouts, self._ep_rewards, logger)
         self.policy_updater.update(policy, rollouts, logger)

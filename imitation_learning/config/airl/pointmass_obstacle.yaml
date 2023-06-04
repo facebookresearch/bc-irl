@@ -49,6 +49,7 @@ policy_updater:
 
     # Returns calculation
     gae_lambda: 0.95
+    use_gae: True
     gamma: ${gamma}
     optimizer_params:
       _target_: torch.optim.Adam

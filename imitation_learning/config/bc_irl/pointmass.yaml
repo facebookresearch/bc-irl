@@ -6,34 +6,37 @@ num_steps: 5
 num_envs: 256
 log_interval: 10
 save_interval: 10000000000
-eval_interval: 500
+eval_interval: 1000000000
 num_env_steps: 5e6
 
 policy_updater:
-  _target_: imitation_learning.bcirl.BCIRL
-  _recursive_: False 
+  _target_: imitation_learning.bc_irl.updater.BCIRL
+  _recursive_: False
+
   batch_size: 256
   plot_interval: ${eval_interval}
   norm_expert_actions: False
   n_inner_iters: 1
   reward_update_freq: 1
+  storage_cfg: ${storage}
   device: ${device}
   num_envs: ${num_envs}
   total_num_updates: ${total_num_updates}
-  use_lr_decay: False
+  use_lr_decay: True
 
   get_dataset_fn:
     _target_: imitation_learning.common.utils.get_transition_dataset
     dataset_path: traj/pm_100.pth
     env_name: ${env.env_name}
 
+
   policy_init_fn:
-    _target_: imitation_learning.bcirl.reg_init
+    _target_: imitation_learning.bc_irl.rewards.reg_init
     _recursive_: False
     policy_cfg: ${policy}
 
   reward:
-    _target_: imitation_learning.common.rewards.NeuralReward
+    _target_: imitation_learning.common.net.NeuralReward
     obs_shape: ${obs_shape}
     action_dim: ${action_dim}
     reward_hidden_dim: 128
@@ -43,7 +46,7 @@ policy_updater:
     n_hidden_layers: 2
 
   inner_updater:
-    _target_: imitation_learning.policy_opt.ppo.PPO
+    _target_: imitation_learning.bc_irl.differentiable_ppo.DifferentiablePPO
     _recursive_: False
 
     use_clipped_value_loss: True
@@ -53,11 +56,10 @@ policy_updater:
     entropy_coef: 0.001
     num_epochs: 2
     num_mini_batch: 4
-    num_envs: ${num_envs}
-    num_steps: ${num_steps}
 
     # Returns calculation
     gae_lambda: 0.95
+    use_gae: True
     gamma: 0.99
 
   inner_opt:
@@ -66,7 +68,7 @@ policy_updater:
 
   reward_opt:
     _target_: torch.optim.Adam
-    lr: 0.001
+    lr: 0.0001
 
   irl_loss:
     _target_: torch.nn.MSELoss
@@ -76,10 +78,8 @@ eval_args:
   policy_updater:
     reward_update_freq: -1
     n_inner_iters: 1
+    use_lr_decay: True
+    inner_opt:
+      lr: 0.0001
   load_policy: False
   num_env_steps: 5e6
-
-
-hydra:
-  run:
-    dir: ./
